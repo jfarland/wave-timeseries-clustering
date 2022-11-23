@@ -1,0 +1,11 @@
+[App]
+Name = "ai.h2o.q.ts-clustering"
+Version = "0.0.1"
+Title = "Time Series Clustering"
+Description = "Find natural patterns among time series data."
+Category = "Data Science"
+Keywords = ["internal"]
+LongDescription = "about.md"
+
+[Runtime]
+Module = "src.app"
