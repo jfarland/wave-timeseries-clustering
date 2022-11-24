@@ -11,7 +11,7 @@ import pandas as pd
 import os
 
 from tsfresh import extract_features
-from tsfresh.feature_extraction import MinimalFCParameters
+from tsfresh.feature_extraction import MinimalFCParameters, EfficientFCParameters
 
 from sklearn.mixture import GaussianMixture
 
@@ -282,48 +282,71 @@ async def handle_experiments(q: Q):
             ]
         ))
 
-        settings = MinimalFCParameters()
+        #settings = MinimalFCParameters()
+        settings = EfficientFCParameters()
 
-        extracted_features = extract_features(sample_df, column_id="id", column_sort="ds", default_fc_parameters=settings).reset_index()
-
-        model = GaussianMixture(n_components=2, covariance_type='full', reg_covar=0.1).fit(extracted_features)
-        labels = model.predict(extracted_features)
+        extracted_features = extract_features(sample_df, column_id="id", column_sort="ds", default_fc_parameters=settings)
+        extracted_features = extracted_features.dropna(axis=1)
+        extracted_features.columns = extracted_features.columns.str.lstrip('y_')
+        #extracted_features = extracted_features[extracted_features.columns[~extracted_features.isnull().all()]]
+        print(extracted_features.head())
 
         embedding = umap.UMAP().fit_transform(extracted_features)
         dim = pd.DataFrame(embedding)
         dim.columns = ['umap1', 'umap2']
-        dim['label'] = labels
+        #dim['label'] = labels
+
+        model = GaussianMixture(n_components=2, covariance_type='full', reg_covar=0.1).fit(dim)
+        dim['label'] = model.predict(dim)
+        dim['label'] = dim['label'].astype(str)
 
         add_card(q, 'experiment_output', ui.form_card(
             box=ui.box('vertical'),
             items = [
-                table_from_df(extracted_features, name='features', downloadable=True)
+                table_from_df(extracted_features.reset_index(), name='features', downloadable=True)
             ]
         ))
 
-        # cluster_plot_data = data('umap1 umap2 label', rows = [tuple(row[0].umap1, row[0].umap2, row[0].label) for row in dim.iterrows()])
+        #ts_plot_rows = [tuple(x) for x in local_df.to_numpy()]
+        cluster_plot_data = data('umap1 umap2 label', rows =  [tuple(x) for x in dim.to_numpy()])
 
-        # add_card(q, 'cluster_viz', ui.plot_card(
-        #     box = ui.box('vertical', height = '1000px'), 
-        #     title = 'Time Series Visualization',
-        #     data = cluster_plot_data,
-        #     plot = ui.plot([
-        #         ui.mark(
-        #             type='point', x='=umap1', y='=umap2', color='=label',
-        #             y_title="Projection 2", x_title='Project 1')
-        #     ])
-        # ))
-
-
-
+        add_card(q, 'cluster_viz', ui.plot_card(
+            box = ui.box('vertical', height = '1000px'), 
+            title = 'Time Series Visualization',
+            data = cluster_plot_data,
+            plot = ui.plot([
+                ui.mark(
+                    type='point', x='=umap1', y='=umap2', color='=label',
+                    y_title="Projection 2", x_title='Project 1')
+            ])
+        ))
 
 
+        # create label - id mapping and merge with original data
+        dim['id'] = list(extracted_features.index)
+        cluster_map = dim
 
+        df_w_label = pd.merge(sample_df, cluster_map, how='left', on='id')
 
+        # aggregate mean profiles by cluster
+        df_agg = df_w_label.groupby(['ds', 'label'])['y'].mean().reset_index()
 
+           #ts_plot_rows = [tuple(x) for x in local_df.to_numpy()]
+        cluster_ts_plot_data = data('timestamp label value', rows =  [tuple(x) for x in df_agg.to_numpy()])
+
+        add_card(q, 'cluster_ts_viz', ui.plot_card(
+            box = ui.box('vertical', height = '1000px'), 
+            title = 'Time Series Visualization',
+            data = cluster_ts_plot_data,
+            plot = ui.plot([
+                ui.mark(
+                    type='path', x='=timestamp', y='=value', color='=label',
+                    y_title="value", x_title='time')
+            ])
+        ))
 
 async def init(q: Q) -> None:
-    q.page['meta'] = ui.meta_card(box='', layouts=[ui.layout(breakpoint='l', min_height='100vh', zones=[
+    q.page['meta'] = ui.meta_card(box='', layouts=[ui.layout(breakpoint='s', min_height='100vh', zones=[
         ui.zone('main', size='1', direction=ui.ZoneDirection.ROW, zones=[
             ui.zone('sidebar', size='250px'),
             ui.zone('body', zones=[
